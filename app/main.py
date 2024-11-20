@@ -1,16 +1,35 @@
-# This is a sample Python script.
+from fastapi import FastAPI
+from prometheus_client import Counter, Gauge, Histogram, generate_latest
+from starlette.responses import Response
+import psutil
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+app = FastAPI()
 
+# Prometheus metrics
+REQUEST_COUNT = Counter("app_requests_total", "Total number of requests", ["method", "endpoint"])
+REQUEST_LATENCY = Histogram("app_request_latency_seconds", "Request latency in seconds", ["endpoint"])
+CPU_USAGE = Gauge("app_cpu_usage_percent", "CPU usage percentage")
+MEMORY_USAGE = Gauge("app_memory_usage_percent", "Memory usage percentage")
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
+@app.middleware("http")
+async def prometheus_middleware(request, call_next):
+    endpoint = request.url.path
+    method = request.method
 
+    REQUEST_COUNT.labels(method=method, endpoint=endpoint).inc()
+    with REQUEST_LATENCY.labels(endpoint=endpoint).time():
+        response = await call_next(request)
+    return response
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+@app.get("/")
+def read_root():
+    return {"message": "Hello, Prometheus and Grafana!"}
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+@app.get("/metrics")
+def metrics():
+    # Capture system resource usage
+    CPU_USAGE.set(psutil.cpu_percent(interval=1))
+    MEMORY_USAGE.set(psutil.virtual_memory().percent)
+
+    # Expose metrics
+    return Response(content=generate_latest(), media_type="text/plain")
